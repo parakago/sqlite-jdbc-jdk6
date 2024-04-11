@@ -24,13 +24,15 @@
 // --------------------------------------
 package org.sqlite;
 
-import java.io.*;
+import java.io.BufferedInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FilenameFilter;
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.URL;
 import java.net.URLConnection;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -38,12 +40,17 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Properties;
 import java.util.UUID;
-import java.util.stream.Stream;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.sqlite.util.LibraryLoaderUtil;
 import org.sqlite.util.OSInfo;
 import org.sqlite.util.StringUtils;
+
+import mock.java.nio.file.Files;
+import mock.java.nio.file.Path;
+import mock.java.nio.file.Paths;
+import mock.java.nio.file.StandardCopyOption;
 
 /**
  * Set the system properties, org.sqlite.lib.path, org.sqlite.lib.name, appropriately so that the
@@ -85,28 +92,29 @@ public class SQLiteJDBCLoader {
      * Deleted old native libraries e.g. on Windows the DLL file is not removed on VM-Exit (bug #80)
      */
     static void cleanup() {
-        String searchPattern = "sqlite-" + getVersion();
-
-        try (Stream<Path> dirList = Files.list(getTempDir().toPath())) {
-            dirList.filter(
-                            path ->
-                                    !path.getFileName().toString().endsWith(LOCK_EXT)
-                                            && path.getFileName()
-                                                    .toString()
-                                                    .startsWith(searchPattern))
-                    .forEach(
-                            nativeLib -> {
-                                Path lckFile = Paths.get(nativeLib + LOCK_EXT);
-                                if (Files.notExists(lckFile)) {
-                                    try {
-                                        Files.delete(nativeLib);
-                                    } catch (Exception e) {
-                                        logger.error("Failed to delete old native lib", e);
-                                    }
-                                }
-                            });
-        } catch (IOException e) {
-            logger.error("Failed to open directory", e);
+        final String searchPattern = "sqlite-" + getVersion();
+        
+        final File dir = new File(getTempDir().getAbsolutePath());
+        
+        final File[] nativeLibFiles = dir.listFiles(
+            new FilenameFilter() {
+                public boolean accept(File dir, String name) {
+                    return name.startsWith(searchPattern) && !name.endsWith(LOCK_EXT);
+                }
+            }
+        );
+        
+        if (nativeLibFiles != null) {
+            for (File nativeLibFile : nativeLibFiles) {
+                File lckFile = new File(nativeLibFile.getAbsolutePath() + LOCK_EXT);
+                if (!lckFile.exists()) {
+                    try {
+                        nativeLibFile.delete();
+                    } catch (SecurityException e) {
+                    	logger.error("Failed to delete old native lib", e);
+                    }
+                }
+            }
         }
     }
 
@@ -185,13 +193,16 @@ public class SQLiteJDBCLoader {
         String extractedLibFileName =
                 String.format("sqlite-%s-%s-%s", getVersion(), uuid, libraryFileName);
         String extractedLckFileName = extractedLibFileName + LOCK_EXT;
-
+        
         Path extractedLibFile = Paths.get(targetFolder, extractedLibFileName);
         Path extractedLckFile = Paths.get(targetFolder, extractedLckFileName);
 
         try {
             // Extract a native library file into the target directory
-            try (InputStream reader = getResourceAsStream(nativeLibraryFilePath)) {
+        	InputStream reader;
+        	try {
+        		reader = getResourceAsStream(nativeLibraryFilePath);
+        		
                 if (Files.notExists(extractedLckFile)) {
                     Files.createFile(extractedLckFile);
                 }
@@ -210,13 +221,24 @@ public class SQLiteJDBCLoader {
 
             // Check whether the contents are properly copied from the resource folder
             {
-                try (InputStream nativeIn = getResourceAsStream(nativeLibraryFilePath);
-                        InputStream extractedLibIn = Files.newInputStream(extractedLibFile)) {
+                InputStream nativeIn = null;
+                InputStream extractedLibIn = null;
+                try {
+                	nativeIn = getResourceAsStream(nativeLibraryFilePath);
+                	extractedLibIn = new FileInputStream(extractedLibFile.toFile());
+                	
                     if (!contentsEquals(nativeIn, extractedLibIn)) {
-                        throw new FileException(
+                        throw new RuntimeException(
                                 String.format(
                                         "Failed to write a native library file at %s",
                                         extractedLibFile));
+                    }
+                } finally {
+                    if (nativeIn != null) {
+                        nativeIn.close();
+                    }
+                    if (extractedLibIn != null) {
+                        extractedLibIn.close();
                     }
                 }
             }
@@ -300,7 +322,7 @@ public class SQLiteJDBCLoader {
             return;
         }
 
-        List<String> triedPaths = new LinkedList<>();
+        List<String> triedPaths = new LinkedList<String>();
 
         // Try loading library from org.sqlite.lib.path library path */
         String sqliteNativeLibraryPath = System.getProperty("org.sqlite.lib.path");
@@ -399,11 +421,11 @@ public class SQLiteJDBCLoader {
         static {
             URL versionFile =
                     VersionHolder.class.getResource(
-                            "/META-INF/maven/org.xerial/sqlite-jdbc/pom.properties");
+                            "/META-INF/maven/org.xerial/sqlite-jdbc-jdk6/pom.properties");
             if (versionFile == null) {
                 versionFile =
                         VersionHolder.class.getResource(
-                                "/META-INF/maven/org.xerial/sqlite-jdbc/VERSION");
+                                "/META-INF/maven/org.xerial/sqlite-jdbc-jdk6/VERSION");
             }
 
             String version = "unknown";

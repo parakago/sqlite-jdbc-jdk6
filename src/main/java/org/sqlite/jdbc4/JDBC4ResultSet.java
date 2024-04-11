@@ -23,10 +23,8 @@ import java.sql.SQLFeatureNotSupportedException;
 import java.sql.SQLXML;
 import java.sql.Time;
 import java.sql.Timestamp;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.LocalTime;
 import java.util.Map;
+
 import org.sqlite.core.CoreStatement;
 import org.sqlite.jdbc3.JDBC3ResultSet;
 
@@ -322,39 +320,7 @@ public class JDBC4ResultSet extends JDBC3ResultSet implements ResultSet, ResultS
         if (type == Date.class) return type.cast(getDate(columnIndex));
         if (type == Time.class) return type.cast(getTime(columnIndex));
         if (type == Timestamp.class) return type.cast(getTimestamp(columnIndex));
-        if (type == LocalDate.class) {
-            try {
-                Date date = getDate(columnIndex);
-                if (date != null) return type.cast(date.toLocalDate());
-                else return null;
-            } catch (SQLException sqlException) {
-                // If the FastDateParser failed, try parse it with LocalDate.
-                // It's a workaround for a value like '2022-12-1' (i.e no time presents).
-                return type.cast(LocalDate.parse(getString(columnIndex)));
-            }
-        }
-        if (type == LocalTime.class) {
-            try {
-                Time time = getTime(columnIndex);
-                if (time != null) return type.cast(time.toLocalTime());
-                else return null;
-            } catch (SQLException sqlException) {
-                // If the FastDateParser failed, try parse it with LocalTime.
-                // It's a workaround for a value like '11:22:22' (i.e no date presents).
-                return type.cast(LocalTime.parse(getString(columnIndex)));
-            }
-        }
-        if (type == LocalDateTime.class) {
-            try {
-                Timestamp timestamp = getTimestamp(columnIndex);
-                if (timestamp != null) return type.cast(timestamp.toLocalDateTime());
-                else return null;
-            } catch (SQLException e) {
-                // If the FastDateParser failed, try parse it with LocalDateTime.
-                return type.cast(LocalDateTime.parse(getString(columnIndex)));
-            }
-        }
-
+        
         int columnType = safeGetColumnType(markCol(columnIndex));
         if (type == Double.class) {
             if (columnType == SQLITE_INTEGER || columnType == SQLITE_FLOAT)

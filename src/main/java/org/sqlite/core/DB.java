@@ -17,10 +17,12 @@ package org.sqlite.core;
 
 import java.sql.BatchUpdateException;
 import java.sql.SQLException;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+
 import org.sqlite.BusyHandler;
 import org.sqlite.Collation;
 import org.sqlite.Function;
@@ -30,6 +32,7 @@ import org.sqlite.SQLiteConfig;
 import org.sqlite.SQLiteErrorCode;
 import org.sqlite.SQLiteException;
 import org.sqlite.SQLiteUpdateListener;
+import org.sqlite.util.Convert;
 
 /*
  * This class is the interface to SQLite. It provides some helper functions
@@ -55,10 +58,11 @@ public abstract class DB implements Codes {
     volatile SafeStmtPtr commit;
 
     /** Tracer for statements to avoid unfinalized statements on db close. */
-    private final Set<SafeStmtPtr> stmts = ConcurrentHashMap.newKeySet();
+    // private final Set<SafeStmtPtr> stmts = ConcurrentHashMap.newKeySet();
+    private final Set<SafeStmtPtr> stmts = Collections.newSetFromMap(new ConcurrentHashMap<SafeStmtPtr, Boolean>());
 
-    private final Set<SQLiteUpdateListener> updateListeners = new HashSet<>();
-    private final Set<SQLiteCommitListener> commitListeners = new HashSet<>();
+    private final Set<SQLiteUpdateListener> updateListeners = new HashSet<SQLiteUpdateListener>();
+    private final Set<SQLiteCommitListener> commitListeners = new HashSet<SQLiteCommitListener>();
 
     public DB(String url, String fileName, SQLiteConfig config) throws SQLException {
         this.url = url;
@@ -187,7 +191,7 @@ public abstract class DB implements Codes {
     public final synchronized void exec(String sql, boolean autoCommit) throws SQLException {
         SafeStmtPtr pointer = prepare(sql);
         try {
-            int rc = pointer.safeRunInt(DB::step);
+            int rc = DB.safeRunStep(pointer);
             switch (rc) {
                 case SQLITE_DONE:
                     ensureAutoCommit(autoCommit);
@@ -350,6 +354,14 @@ public abstract class DB implements Codes {
      *     href="https://www.sqlite.org/c3ref/step.html">https://www.sqlite.org/c3ref/step.html</a>
      */
     public abstract int step(long stmt) throws SQLException;
+    
+    public static int safeRunStep(SafeStmtPtr pointer) throws SQLException {
+    	return pointer.safeRunInt(new SafeStmtPtr.SafePtrIntFunction<SQLException>() {
+        	public int run(DB db, long ptr) throws SQLException {
+        		return db.step(ptr);
+        	}
+        });
+    }
 
     /**
      * Sets a prepared statement object back to its initial state, ready to be re-executed.
@@ -361,7 +373,15 @@ public abstract class DB implements Codes {
      *     href="https://www.sqlite.org/c3ref/reset.html">https://www.sqlite.org/c3ref/reset.html</a>
      */
     public abstract int reset(long stmt) throws SQLException;
-
+    
+    public static int safeRunReset(SafeStmtPtr pointer) throws SQLException {
+    	return pointer.safeRunInt(new SafeStmtPtr.SafePtrIntFunction<SQLException>() {
+        	public int run(DB db, long ptr) throws SQLException {
+        		return db.reset(ptr);
+        	}
+        });
+    }
+    
     /**
      * Reset all bindings on a prepared statement (reset all host parameters to NULL).
      *
@@ -372,6 +392,15 @@ public abstract class DB implements Codes {
      *     href="https://www.sqlite.org/c3ref/clear_bindings.html">https://www.sqlite.org/c3ref/clear_bindings.html</a>
      */
     public abstract int clear_bindings(long stmt) throws SQLException; // TODO remove?
+    
+    public static void safeRunClearBindings(SafeStmtPtr pointer) throws SQLException {
+    	pointer.safeRunConsume(new SafeStmtPtr.SafePtrConsumer<SQLException>() {
+    		@Override
+    		public void run(DB db, long ptr) throws SQLException {
+    			db.clear_bindings(ptr);
+    		}
+		});
+    }
 
     /**
      * @param stmt Pointer to the statement.
@@ -381,7 +410,15 @@ public abstract class DB implements Codes {
      *     href="https://www.sqlite.org/c3ref/bind_parameter_count.html">https://www.sqlite.org/c3ref/bind_parameter_count.html</a>
      */
     abstract int bind_parameter_count(long stmt) throws SQLException;
-
+    
+    public static int safeRunBindParameterCount(SafeStmtPtr pointer) throws SQLException {
+    	return pointer.safeRunInt(new SafeStmtPtr.SafePtrIntFunction<SQLException>() {
+        	public int run(DB db, long ptr) throws SQLException {
+        		return db.bind_parameter_count(ptr);
+        	}
+        });
+    }
+    
     /**
      * @param stmt Pointer to the statement.
      * @return Number of columns in the result set returned by the prepared statement.
@@ -390,6 +427,14 @@ public abstract class DB implements Codes {
      *     href="https://www.sqlite.org/c3ref/column_count.html">https://www.sqlite.org/c3ref/column_count.html</a>
      */
     public abstract int column_count(long stmt) throws SQLException;
+    
+    public static int safeRunColumnCount(SafeStmtPtr pointer) throws SQLException {
+    	return pointer.safeRunInt(new SafeStmtPtr.SafePtrIntFunction<SQLException>() {
+        	public int run(DB db, long ptr) throws SQLException {
+        		return db.column_count(ptr);
+        	}
+        });
+    }
 
     /**
      * @param stmt Pointer to the statement.
@@ -449,8 +494,8 @@ public abstract class DB implements Codes {
      * @see <a
      *     href="https://www.sqlite.org/c3ref/column_blob.html">https://www.sqlite.org/c3ref/column_blob.html</a>
      */
-    public abstract byte[] column_blob(long stmt, int col) throws SQLException;
-
+    public abstract byte[] column_blob(long stmt, final int col) throws SQLException;
+    
     /**
      * @param stmt Pointer to the statement.
      * @param col Number of column.
@@ -848,7 +893,15 @@ public abstract class DB implements Codes {
      * @throws SQLException
      */
     abstract boolean[][] column_metadata(long stmt) throws SQLException;
-
+    
+    public static boolean[][] safeRunColumnMetadata(SafeStmtPtr pointer) throws SQLException {
+    	return pointer.safeRun(new SafeStmtPtr.SafePtrFunction<boolean[][], SQLException>() {
+        	public boolean[][] run(DB db, long ptr) throws SQLException {
+        		return db.column_metadata(ptr);
+        	}
+        });
+    }
+    
     // COMPOUND FUNCTIONS ////////////////////////////////////////////
 
     /**
@@ -864,6 +917,15 @@ public abstract class DB implements Codes {
             names[i] = column_name(stmt, i);
         }
         return names;
+    }
+    
+    public static String[] safeRunColumnNames(SafeStmtPtr pointer) throws SQLException {
+    	return pointer.safeRun(new SafeStmtPtr.SafePtrFunction<String[], SQLException>() {
+    		@Override
+    		public String[] run(DB db, long ptr) throws SQLException {
+    			return db.column_names(ptr);
+    		}
+		});
     }
 
     /**
@@ -912,8 +974,13 @@ public abstract class DB implements Codes {
      * @throws SQLException if statement is not open or is being used elsewhere
      */
     final synchronized long[] executeBatch(
-            SafeStmtPtr stmt, int count, Object[] vals, boolean autoCommit) throws SQLException {
-        return stmt.safeRun((db, ptr) -> this.executeBatch(ptr, count, vals, autoCommit));
+            SafeStmtPtr stmt, final int count, final Object[] vals, final boolean autoCommit) throws SQLException {
+    	return stmt.safeRun(new SafeStmtPtr.SafePtrFunction<long[], SQLException>() {
+    		@Override
+    		public long[] run(DB db, long ptr) throws SQLException {
+    			return executeBatch(ptr, count, vals, autoCommit);
+    		}
+		});
     }
 
     private synchronized long[] executeBatch(
@@ -945,7 +1012,7 @@ public abstract class DB implements Codes {
                                 "batch entry " + i + ": query returns results",
                                 null,
                                 0,
-                                changes,
+                                Convert.toIntArray(changes),
                                 null);
                     }
                     throwex(rc);
@@ -969,9 +1036,14 @@ public abstract class DB implements Codes {
      * @return True if a row of ResultSet is ready; false otherwise.
      * @throws SQLException
      */
-    public final synchronized boolean execute(CoreStatement stmt, Object[] vals)
+    public final synchronized boolean execute(CoreStatement stmt, final Object[] vals)
             throws SQLException {
-        int statusCode = stmt.pointer.safeRunInt((db, ptr) -> execute(ptr, vals));
+    	int statusCode = stmt.pointer.safeRunInt(new SafeStmtPtr.SafePtrIntFunction<SQLException>() {
+    		@Override
+    		public int run(DB db, long ptr) throws SQLException {
+    			return execute(ptr, vals);
+    		}
+		});
         switch (statusCode & 0xFF) {
             case SQLITE_DONE:
                 ensureAutoCommit(stmt.conn.getAutoCommit());
@@ -1056,7 +1128,7 @@ public abstract class DB implements Codes {
             }
         } finally {
             if (!stmt.pointer.isClosed()) {
-                stmt.pointer.safeRunInt(DB::reset);
+            	DB.safeRunReset(stmt.pointer);
             }
         }
         return changes();
@@ -1094,7 +1166,7 @@ public abstract class DB implements Codes {
         Set<SQLiteUpdateListener> listeners;
 
         synchronized (this) {
-            listeners = new HashSet<>(updateListeners);
+            listeners = new HashSet<SQLiteUpdateListener>(updateListeners);
         }
 
         for (SQLiteUpdateListener listener : listeners) {
@@ -1122,7 +1194,7 @@ public abstract class DB implements Codes {
         Set<SQLiteCommitListener> listeners;
 
         synchronized (this) {
-            listeners = new HashSet<>(commitListeners);
+            listeners = new HashSet<SQLiteCommitListener>(commitListeners);
         }
 
         for (SQLiteCommitListener listener : listeners) {
@@ -1219,12 +1291,18 @@ public abstract class DB implements Codes {
         }
 
         ensureBeginAndCommit();
-
-        begin.safeRunConsume(
-                (db, beginPtr) -> {
-                    commit.safeRunConsume(
-                            (db2, commitPtr) -> ensureAutocommit(beginPtr, commitPtr));
-                });
+        
+        begin.safeRunConsume(new SafeStmtPtr.SafePtrConsumer<SQLException>() {
+        	@Override
+        	public void run(DB db, final long beginPtr) throws SQLException {
+        		commit.safeRunConsume(new SafeStmtPtr.SafePtrConsumer<SQLException>() {
+        			@Override
+        			public void run(DB db2, long commitPtr) throws SQLException {
+        				ensureAutocommit(beginPtr, commitPtr);
+        			}
+        		});
+        	}
+		});
     }
 
     private void ensureBeginAndCommit() throws SQLException {

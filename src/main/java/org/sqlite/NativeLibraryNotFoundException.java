@@ -1,7 +1,9 @@
 package org.sqlite;
 
 public class NativeLibraryNotFoundException extends Exception {
-    public NativeLibraryNotFoundException(String message) {
+    private static final long serialVersionUID = 1L;
+
+	public NativeLibraryNotFoundException(String message) {
         super(message);
     }
 }

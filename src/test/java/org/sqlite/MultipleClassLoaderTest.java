@@ -24,43 +24,46 @@
 // --------------------------------------
 package org.sqlite;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.fail;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.fail;
 
 import java.io.BufferedInputStream;
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.lang.reflect.Method;
 import java.net.URL;
 import java.net.URLClassLoader;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.util.Arrays;
-import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Test;
+
+import mock.java.nio.file.Files;
+import mock.java.nio.file.Paths;
 
 public class MultipleClassLoaderTest {
 
     private Connection connection = null;
 
-    @BeforeEach
+    @Before
     public void setUp() throws Exception {
         connection = null;
         // create a database connection
         connection = DriverManager.getConnection("jdbc:sqlite::memory:");
     }
 
-    @AfterEach
+    @After
     public void tearDown() throws Exception {
         if (connection != null) {
             connection.close();
@@ -73,8 +76,8 @@ public class MultipleClassLoaderTest {
         String[] stringUrls =
                 System.getProperty("java.class.path").split(System.getProperty("path.separator"));
         // Find the classes under test.
-        String targetFolderName =
-                Paths.get("").toAbsolutePath().resolve(Paths.get("target", "classes")).toString();
+        String targetFolderName = Paths.get("target", "classes").toString();
+                // Paths.get("").toAbsolutePath().resolve(Paths.get("target", "classes")).toString();
         File classesDir = null;
         String classesDirPrefix = null;
         for (String stringUrl : stringUrls) {
@@ -91,50 +94,57 @@ public class MultipleClassLoaderTest {
 
         // find the slf4j-api jar
         String targetSlf4j = Paths.get("org", "slf4j", "slf4j-api").toString();
-        Optional<String> slf4jApi =
-                Arrays.stream(stringUrls).filter(s -> s.contains(targetSlf4j)).findFirst();
-        if (!slf4jApi.isPresent()) fail("Couldn't find slf4j-api");
-
+        String slf4jApi = null;
+        for (String s : stringUrls) {
+        	if (s.contains(targetSlf4j)) {
+        		slf4jApi = s;
+        		break;
+        	}
+        }
+        if (slf4jApi == null) fail("Couldn't find slf4j-api");
+        
         // Create a JAR file out the classes and resources
         File jarFile = File.createTempFile("jar-for-test-", ".jar");
         createJar(classesDir, classesDirPrefix, jarFile);
-        URL[] jarUrl =
+        final URL[] jarUrl =
                 new URL[] {
-                    jarFile.toPath().toUri().toURL(), Paths.get(slf4jApi.get()).toUri().toURL()
+                	jarFile.toURI().toURL(), new File(slf4jApi).toURI().toURL()
                 };
 
         final AtomicInteger completedThreads = new AtomicInteger(0);
         ExecutorService pool = Executors.newFixedThreadPool(4);
         for (int i = 0; i < 4; i++) {
             final int sleepMillis = i;
-            pool.execute(
-                    () -> {
-                        try {
-                            Thread.sleep(sleepMillis * 10);
-                            // Create an isolated class loader, it should load *different* instances
-                            // of SQLiteJDBCLoader.class
-                            URLClassLoader classLoader =
-                                    new URLClassLoader(
-                                            jarUrl, ClassLoader.getSystemClassLoader().getParent());
-                            Class<?> clazz = classLoader.loadClass("org.sqlite.SQLiteJDBCLoader");
-                            Method initMethod = clazz.getDeclaredMethod("initialize");
-                            initMethod.invoke(null);
-                            classLoader.close();
-                        } catch (Throwable e) {
-                            e.printStackTrace();
-                            fail(e.getLocalizedMessage());
-                        }
-                        completedThreads.incrementAndGet();
-                    });
+            pool.execute(new Runnable() {
+				@Override
+				public void run() {
+                    try {
+                        Thread.sleep(sleepMillis * 10);
+                        // Create an isolated class loader, it should load *different* instances
+                        // of SQLiteJDBCLoader.class
+                        URLClassLoader classLoader =
+                                new URLClassLoader(
+                                        jarUrl, ClassLoader.getSystemClassLoader().getParent());
+                        Class<?> clazz = classLoader.loadClass("org.sqlite.SQLiteJDBCLoader");
+                        Method initMethod = clazz.getDeclaredMethod("initialize");
+                        initMethod.invoke(null);
+                        // classLoader.close();
+                    } catch (Throwable e) {
+                        e.printStackTrace();
+                        fail(e.getLocalizedMessage());
+                    }
+                    completedThreads.incrementAndGet();
+				}
+			});
         }
         pool.shutdown();
         pool.awaitTermination(3, TimeUnit.SECONDS);
-        assertThat(completedThreads.get()).isEqualTo(4);
+        assertEquals(completedThreads.get(), 4);
     }
 
     private static void createJar(File inputDir, String changeDir, File outputFile)
             throws IOException {
-        JarOutputStream target = new JarOutputStream(Files.newOutputStream(outputFile.toPath()));
+        JarOutputStream target = new JarOutputStream(new FileOutputStream(outputFile));
         addJarEntry(inputDir, changeDir, target);
         target.close();
     }
@@ -165,7 +175,7 @@ public class MultipleClassLoaderTest {
                             source.getPath().replace("\\", "/").substring(changeDir.length() + 1));
             entry.setTime(source.lastModified());
             target.putNextEntry(entry);
-            in = new BufferedInputStream(Files.newInputStream(source.toPath()));
+            in = new BufferedInputStream(new FileInputStream(source));
 
             byte[] buffer = new byte[8192];
             while (true) {

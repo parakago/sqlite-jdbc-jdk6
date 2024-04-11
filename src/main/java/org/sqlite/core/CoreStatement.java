@@ -97,8 +97,8 @@ public abstract class CoreStatement implements Codes {
                 this.pointer.close();
             }
         }
-
-        return pointer.safeRunInt(DB::column_count) != 0;
+        
+        return DB.safeRunColumnCount(pointer) != 0;
     }
 
     /**
@@ -130,7 +130,7 @@ public abstract class CoreStatement implements Codes {
             }
         }
 
-        return pointer.safeRunInt(DB::column_count) != 0;
+        return DB.safeRunColumnCount(pointer) != 0;
     }
 
     protected void internalClose() throws SQLException {

@@ -7,8 +7,9 @@ import java.net.MalformedURLException;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.net.URLConnection;
-import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
+import mock.java.nio.file.Files;
+import mock.java.nio.file.Paths;
+import mock.java.nio.file.StandardCopyOption;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
@@ -77,9 +78,9 @@ public abstract class SQLiteConnection implements Connection {
                     newDB.close();
                 }
             } catch (Exception e) {
-                t.addSuppressed(e);
+            	throw new SQLException(e);
             }
-            throw t;
+            throw new SQLException(t);
         }
     }
 
@@ -335,9 +336,13 @@ public abstract class SQLiteConnection implements Connection {
         URLConnection conn = resourceAddr.openConnection();
         // Disable caches to avoid keeping unnecessary file references after the single-use copy
         conn.setUseCaches(false);
-        try (InputStream reader = conn.getInputStream()) {
-            Files.copy(reader, dbFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
-            return dbFile;
+        InputStream reader = null;
+        try {
+        	reader = conn.getInputStream();
+        	Files.copy(reader, Paths.get(dbFile), StandardCopyOption.REPLACE_EXISTING);
+        	return dbFile;
+        } finally {
+        	if (reader != null) reader.close();
         }
     }
 

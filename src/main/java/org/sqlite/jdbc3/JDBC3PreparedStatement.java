@@ -10,7 +10,6 @@ import java.sql.Array;
 import java.sql.Blob;
 import java.sql.Clob;
 import java.sql.Date;
-import java.sql.JDBCType;
 import java.sql.ParameterMetaData;
 import java.sql.Ref;
 import java.sql.ResultSet;
@@ -35,7 +34,7 @@ public abstract class JDBC3PreparedStatement extends CorePreparedStatement {
     /** @see java.sql.PreparedStatement#clearParameters() */
     public void clearParameters() throws SQLException {
         checkOpen();
-        pointer.safeRunConsume(DB::clear_bindings);
+        DB.safeRunClearBindings(pointer);
         if (batch != null) for (int i = batchPos; i < batchPos + paramCount; i++) batch[i] = null;
     }
 
@@ -43,29 +42,35 @@ public abstract class JDBC3PreparedStatement extends CorePreparedStatement {
     public boolean execute() throws SQLException {
         checkOpen();
         rs.close();
-        pointer.safeRunConsume(DB::reset);
+        // pointer.safeRunConsume(DB::reset);
+        DB.safeRunReset(pointer);
         exhaustedResults = false;
 
         if (this.conn instanceof JDBC3Connection) {
             ((JDBC3Connection) this.conn).tryEnforceTransactionMode();
         }
-
-        return this.withConnectionTimeout(
-                () -> {
-                    boolean success = false;
-                    try {
-                        synchronized (conn) {
-                            resultsWaiting =
-                                    conn.getDatabase().execute(JDBC3PreparedStatement.this, batch);
-                            updateGeneratedKeys();
-                            success = true;
-                            updateCount = getDatabase().changes();
-                        }
-                        return 0 != columnCount;
-                    } finally {
-                        if (!success && !pointer.isClosed()) pointer.safeRunConsume(DB::reset);
+        
+        return this.withConnectionTimeout(new SQLCallable<Boolean>() {
+        	@Override
+        	public Boolean call() throws SQLException {
+        		boolean success = false;
+                try {
+                    synchronized (conn) {
+                        resultsWaiting =
+                                conn.getDatabase().execute(JDBC3PreparedStatement.this, batch);
+                        updateGeneratedKeys();
+                        success = true;
+                        updateCount = getDatabase().changes();
                     }
-                });
+                    return 0 != columnCount;
+                } finally {
+                    if (!success && !pointer.isClosed()) {
+                    	// pointer.safeRunConsume(DB::reset);
+                    	DB.safeRunReset(pointer);
+                    }
+                }
+        	}
+		});
     }
 
     /** @see java.sql.PreparedStatement#executeQuery() */
@@ -77,27 +82,31 @@ public abstract class JDBC3PreparedStatement extends CorePreparedStatement {
         }
 
         rs.close();
-        pointer.safeRunConsume(DB::reset);
+        //pointer.safeRunConsume(DB::reset);
+        DB.safeRunReset(pointer);
         exhaustedResults = false;
 
         if (this.conn instanceof JDBC3Connection) {
             ((JDBC3Connection) this.conn).tryEnforceTransactionMode();
         }
-
-        return this.withConnectionTimeout(
-                () -> {
-                    boolean success = false;
-                    try {
-                        resultsWaiting =
-                                conn.getDatabase().execute(JDBC3PreparedStatement.this, batch);
-                        success = true;
-                    } finally {
-                        if (!success && !pointer.isClosed()) {
-                            pointer.safeRunInt(DB::reset);
-                        }
+        
+        return this.withConnectionTimeout(new SQLCallable<ResultSet>() {
+        	@Override
+        	public ResultSet call() throws SQLException {
+        		boolean success = false;
+                try {
+                    resultsWaiting =
+                            conn.getDatabase().execute(JDBC3PreparedStatement.this, batch);
+                    success = true;
+                } finally {
+                    if (!success && !pointer.isClosed()) {
+                    	// pointer.safeRunInt(DB::reset);
+                    	DB.safeRunReset(pointer);
                     }
-                    return getResultSet();
-                });
+                }
+                return getResultSet();
+        	}
+		});
     }
 
     /** @see java.sql.PreparedStatement#executeUpdate() */
@@ -114,23 +123,26 @@ public abstract class JDBC3PreparedStatement extends CorePreparedStatement {
         }
 
         rs.close();
-        pointer.safeRunConsume(DB::reset);
+        // pointer.safeRunConsume(DB::reset);
+        DB.safeRunReset(pointer);
         exhaustedResults = false;
 
         if (this.conn instanceof JDBC3Connection) {
             ((JDBC3Connection) this.conn).tryEnforceTransactionMode();
         }
-
-        return this.withConnectionTimeout(
-                () -> {
-                    synchronized (conn) {
-                        long rc =
-                                conn.getDatabase()
-                                        .executeUpdate(JDBC3PreparedStatement.this, batch);
-                        updateGeneratedKeys();
-                        return rc;
-                    }
-                });
+        
+        return this.withConnectionTimeout(new SQLCallable<Long>() {
+        	@Override
+        	public Long call() throws SQLException {
+        		synchronized (conn) {
+                    long rc =
+                            conn.getDatabase()
+                                    .executeUpdate(JDBC3PreparedStatement.this, batch);
+                    updateGeneratedKeys();
+                    return rc;
+                }
+        	}
+		});
     }
 
     /** @see java.sql.PreparedStatement#addBatch() */
@@ -171,7 +183,7 @@ public abstract class JDBC3PreparedStatement extends CorePreparedStatement {
     /** @see java.sql.ParameterMetaData#getParameterTypeName(int) */
     public String getParameterTypeName(int pos) throws SQLException {
         checkIndex(pos);
-        return JDBCType.valueOf(getParameterType(pos)).getName();
+        return mock.java.sql.JDBCType.valueOf(getParameterType(pos)).getName();
     }
 
     /** @see java.sql.ParameterMetaData#getParameterType(int) */

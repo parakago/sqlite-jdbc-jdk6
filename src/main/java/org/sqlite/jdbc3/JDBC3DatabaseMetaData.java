@@ -20,13 +20,14 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.sqlite.SQLiteConnection;
 import org.sqlite.core.CoreDatabaseMetaData;
 import org.sqlite.core.CoreStatement;
 import org.sqlite.jdbc3.JDBC3DatabaseMetaData.ImportedKeyFinder.ForeignKey;
+import org.sqlite.util.Convert;
 import org.sqlite.util.QueryUtils;
 import org.sqlite.util.StringUtils;
 
@@ -36,22 +37,33 @@ public abstract class JDBC3DatabaseMetaData extends CoreDatabaseMetaData {
     private static String driverVersion;
 
     static {
-        try (InputStream sqliteJdbcPropStream =
-                JDBC3DatabaseMetaData.class
-                        .getClassLoader()
-                        .getResourceAsStream("sqlite-jdbc.properties")) {
-            if (sqliteJdbcPropStream == null) {
+    	InputStream sqliteJdbcPropStream = null;
+    	try {
+    		sqliteJdbcPropStream =
+                    JDBC3DatabaseMetaData.class
+                            .getClassLoader()
+                            .getResourceAsStream("sqlite-jdbc.properties");
+    		if (sqliteJdbcPropStream == null) {
                 throw new IOException("Cannot load sqlite-jdbc.properties from jar");
             }
             final Properties sqliteJdbcProp = new Properties();
             sqliteJdbcProp.load(sqliteJdbcPropStream);
             driverName = sqliteJdbcProp.getProperty("name");
             driverVersion = sqliteJdbcProp.getProperty("version");
-        } catch (Exception e) {
+    	} catch (Exception e) {
             // Default values
             driverName = "SQLite JDBC";
             driverVersion = "3.0.0-UNKNOWN";
-        }
+        } finally {
+        	if (sqliteJdbcPropStream != null) {
+        		try {
+        			sqliteJdbcPropStream.close();
+        		} catch (IOException e) {
+        			// ignore
+        		}
+        	}
+		}
+    	
     }
 
     protected JDBC3DatabaseMetaData(SQLiteConnection conn) {
@@ -978,9 +990,12 @@ public abstract class JDBC3DatabaseMetaData extends CoreDatabaseMetaData {
 
                 // For each table, get the column info and build into overall SQL
                 String pragmaStatement = "PRAGMA table_xinfo('" + escape(tableName) + "')";
-                try (Statement colstat = conn.createStatement();
-                        ResultSet rscol = colstat.executeQuery(pragmaStatement)) {
-
+                
+                Statement colstat = null;
+                ResultSet rscol = null;
+                try {
+                	colstat = conn.createStatement();
+                	rscol = colstat.executeQuery(pragmaStatement);
                     for (int i = 0; rscol.next(); i++) {
                         String colName = rscol.getString(2);
                         String colType = rscol.getString(3);
@@ -1057,10 +1072,10 @@ public abstract class JDBC3DatabaseMetaData extends CoreDatabaseMetaData {
                                 }
                                 // try to parse the values
                                 try {
-                                    int iInteger = Integer.parseUnsignedInt(sInteger);
+                                    int iInteger = Convert.parseUnsignedInt(sInteger);
                                     // parse decimals?
                                     if (sDecimal != null) {
-                                        iDecimalDigits = Integer.parseUnsignedInt(sDecimal);
+                                        iDecimalDigits = Convert.parseUnsignedInt(sDecimal);
                                         // columns size equals sum of integer and decimal part
                                         // of dimension
                                         iColumnSize = iInteger + iDecimalDigits;
@@ -1115,7 +1130,10 @@ public abstract class JDBC3DatabaseMetaData extends CoreDatabaseMetaData {
                                     .append("'");
                         }
                     }
-                }
+                } finally {
+					rscol.close();
+					colstat.close();
+				}
             }
         } finally {
             if (rs != null) {
@@ -1233,7 +1251,7 @@ public abstract class JDBC3DatabaseMetaData extends CoreDatabaseMetaData {
         return ((CoreStatement) stat).executeQuery(sql.append(") order by cn;").toString(), true);
     }
 
-    private static final Map<String, Integer> RULE_MAP = new HashMap<>();
+    private static final Map<String, Integer> RULE_MAP = new HashMap<String, Integer>();
 
     static {
         RULE_MAP.put("NO ACTION", DatabaseMetaData.importedKeyNoAction);
@@ -1263,9 +1281,10 @@ public abstract class JDBC3DatabaseMetaData extends CoreDatabaseMetaData {
         if (pkColumns != null) {
             // retrieve table list
             ArrayList<String> tableList;
-            try (ResultSet rs =
-                    stat.executeQuery("select name from sqlite_schema where type = 'table'")) {
-                tableList = new ArrayList<>();
+            ResultSet rs = null;
+            try {
+            	rs = stat.executeQuery("select name from sqlite_schema where type = 'table'");
+                tableList = new ArrayList<String>();
 
                 while (rs.next()) {
                     String tblname = rs.getString(1);
@@ -1276,7 +1295,9 @@ public abstract class JDBC3DatabaseMetaData extends CoreDatabaseMetaData {
                         target = tblname;
                     }
                 }
-            }
+            } finally {
+				rs.close();
+			}
 
             // find imported keys for each table
             for (String tbl : tableList) {
@@ -1539,9 +1560,9 @@ public abstract class JDBC3DatabaseMetaData extends CoreDatabaseMetaData {
         // this always returns a result set now, previously threw exception
         rs = stat.executeQuery("pragma index_list('" + escape(table) + "');");
 
-        ArrayList<ArrayList<Object>> indexList = new ArrayList<>();
+        ArrayList<ArrayList<Object>> indexList = new ArrayList<ArrayList<Object>>();
         while (rs.next()) {
-            indexList.add(new ArrayList<>());
+            indexList.add(new ArrayList<Object>());
             indexList.get(indexList.size() - 1).add(rs.getString(2));
             indexList.get(indexList.size() - 1).add(rs.getInt(3));
         }
@@ -1556,7 +1577,7 @@ public abstract class JDBC3DatabaseMetaData extends CoreDatabaseMetaData {
             Iterator<ArrayList<Object>> indexIterator = indexList.iterator();
             ArrayList<Object> currentIndex;
 
-            ArrayList<String> unionAll = new ArrayList<>();
+            ArrayList<String> unionAll = new ArrayList<String>();
 
             while (indexIterator.hasNext()) {
                 currentIndex = indexIterator.next();
@@ -1735,10 +1756,12 @@ public abstract class JDBC3DatabaseMetaData extends CoreDatabaseMetaData {
 
         if (types != null && types.length != 0) {
             sql.append(" AND TABLE_TYPE IN (");
-            sql.append(
-                    Arrays.stream(types)
-                            .map((t) -> "'" + t.toUpperCase() + "'")
-                            .collect(Collectors.joining(",")));
+            
+            List<String> uTypes = new ArrayList<String>();
+            for (String type : types) {
+            	uTypes.add("'" + type.toUpperCase() + "'");
+            }
+            sql.append(StringUtils.join(",", uTypes));
             sql.append(")");
         }
 
@@ -1766,10 +1789,15 @@ public abstract class JDBC3DatabaseMetaData extends CoreDatabaseMetaData {
         getTableTypes.clearParameters();
         return getTableTypes.executeQuery();
     }
-
+    
+    private List<Object> asList(Object ...args) {
+    	return Arrays.asList(args);
+    }
+    
     /** @see java.sql.DatabaseMetaData#getTypeInfo() */
     public ResultSet getTypeInfo() throws SQLException {
         if (getTypeInfo == null) {
+        	
             String sql =
                     QueryUtils.valuesQuery(
                                     Arrays.asList(
@@ -1792,7 +1820,7 @@ public abstract class JDBC3DatabaseMetaData extends CoreDatabaseMetaData {
                                             "SQL_DATETIME_SUB",
                                             "NUM_PREC_RADIX"),
                                     Arrays.asList(
-                                            Arrays.asList(
+                                    		asList(
                                                     "BLOB",
                                                     Types.BLOB,
                                                     0,
@@ -1811,7 +1839,7 @@ public abstract class JDBC3DatabaseMetaData extends CoreDatabaseMetaData {
                                                     0,
                                                     0,
                                                     10),
-                                            Arrays.asList(
+                                            asList(
                                                     "INTEGER",
                                                     Types.INTEGER,
                                                     0,
@@ -1830,7 +1858,7 @@ public abstract class JDBC3DatabaseMetaData extends CoreDatabaseMetaData {
                                                     0,
                                                     0,
                                                     10),
-                                            Arrays.asList(
+                                            asList(
                                                     "NULL",
                                                     Types.NULL,
                                                     0,
@@ -1849,7 +1877,7 @@ public abstract class JDBC3DatabaseMetaData extends CoreDatabaseMetaData {
                                                     0,
                                                     0,
                                                     10),
-                                            Arrays.asList(
+                                            asList(
                                                     "REAL",
                                                     Types.REAL,
                                                     0,
@@ -1868,7 +1896,7 @@ public abstract class JDBC3DatabaseMetaData extends CoreDatabaseMetaData {
                                                     0,
                                                     0,
                                                     10),
-                                            Arrays.asList(
+                                            asList(
                                                     "TEXT",
                                                     Types.VARCHAR,
                                                     0,
@@ -1989,15 +2017,17 @@ public abstract class JDBC3DatabaseMetaData extends CoreDatabaseMetaData {
             if (table == null || table.trim().length() == 0) {
                 throw new SQLException("Invalid table name: '" + this.table + "'");
             }
-
-            try (Statement stat = conn.createStatement();
-                    // read create SQL script for table
-                    ResultSet rs =
-                            stat.executeQuery(
-                                    "select sql from sqlite_schema where"
-                                            + " lower(name) = lower('"
-                                            + escape(table)
-                                            + "') and type in ('table', 'view')")) {
+            
+            Statement stat = null;
+            ResultSet rs = null;
+            try {
+            	stat = conn.createStatement();
+                // read create SQL script for table
+                rs = stat.executeQuery(
+                                "select sql from sqlite_schema where"
+                                        + " lower(name) = lower('"
+                                        + escape(table)
+                                        + "') and type in ('table', 'view')");
 
                 if (!rs.next()) throw new SQLException("Table not found: '" + table + "'");
 
@@ -2013,12 +2043,15 @@ public abstract class JDBC3DatabaseMetaData extends CoreDatabaseMetaData {
                 }
 
                 if (pkColumns == null) {
-                    try (ResultSet rs2 =
-                            stat.executeQuery("pragma table_info('" + escape(table) + "');")) {
+                	ResultSet rs2 = null;
+                    try {
+                    	rs2 = stat.executeQuery("pragma table_info('" + escape(table) + "');");
                         while (rs2.next()) {
                             if (rs2.getBoolean(6)) pkColumns = new String[] {rs2.getString(2)};
                         }
-                    }
+                    } finally {
+						if (rs2 != null) rs2.close();
+					}
                 }
 
                 if (pkColumns != null) {
@@ -2026,6 +2059,9 @@ public abstract class JDBC3DatabaseMetaData extends CoreDatabaseMetaData {
                         pkColumns[i] = unquoteIdentifier(pkColumns[i]);
                     }
                 }
+            } finally {
+            	if (rs != null) rs.close();
+            	if (stat != null) stat.close();
             }
         }
 
@@ -2049,7 +2085,7 @@ public abstract class JDBC3DatabaseMetaData extends CoreDatabaseMetaData {
                         Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
 
         private final String fkTableName;
-        private final List<ForeignKey> fkList = new ArrayList<>();
+        private final List<ForeignKey> fkList = new ArrayList<ForeignKey>();
 
         public ImportedKeyFinder(String table) throws SQLException {
 
@@ -2060,14 +2096,15 @@ public abstract class JDBC3DatabaseMetaData extends CoreDatabaseMetaData {
             this.fkTableName = table;
 
             List<String> fkNames = getForeignKeyNames(this.fkTableName);
-
-            try (Statement stat = conn.createStatement();
-                    ResultSet rs =
-                            stat.executeQuery(
-                                    "pragma foreign_key_list('"
-                                            + escape(this.fkTableName.toLowerCase())
-                                            + "')")) {
-
+            
+            Statement stat = null;
+            ResultSet rs = null;
+            try {
+            	stat = conn.createStatement();
+                rs = stat.executeQuery(
+                                "pragma foreign_key_list('"
+                                        + escape(this.fkTableName.toLowerCase())
+                                        + "')");
                 int prevFkId = -1;
                 int count = 0;
                 ForeignKey fk = null;
@@ -2100,22 +2137,27 @@ public abstract class JDBC3DatabaseMetaData extends CoreDatabaseMetaData {
                         fk.addColumnMapping(fkColName, pkColName);
                     }
                 }
+            } finally {
+            	if (rs != null) rs.close();
+            	if (stat != null) stat.close();
             }
         }
 
         private List<String> getForeignKeyNames(String tbl) throws SQLException {
-            List<String> fkNames = new ArrayList<>();
+            List<String> fkNames = new ArrayList<String>();
             if (tbl == null) {
                 return fkNames;
             }
-            try (Statement stat2 = conn.createStatement();
-                    ResultSet rs =
-                            stat2.executeQuery(
-                                    "select sql from sqlite_schema where"
-                                            + " lower(name) = lower('"
-                                            + escape(tbl)
-                                            + "')")) {
-
+            
+            Statement stat2 = null;
+            ResultSet rs = null;
+            try {
+            	stat2 = conn.createStatement();
+                rs = stat2.executeQuery(
+                                "select sql from sqlite_schema where"
+                                        + " lower(name) = lower('"
+                                        + escape(tbl)
+                                        + "')");
                 if (rs.next()) {
                     Matcher matcher = FK_NAMED_PATTERN.matcher(rs.getString(1));
 
@@ -2123,6 +2165,9 @@ public abstract class JDBC3DatabaseMetaData extends CoreDatabaseMetaData {
                         fkNames.add(matcher.group(1));
                     }
                 }
+            } finally {
+            	if (rs != null) rs.close();
+            	if (stat2 != null) stat2.close();
             }
             Collections.reverse(fkNames);
             return fkNames;
@@ -2141,8 +2186,8 @@ public abstract class JDBC3DatabaseMetaData extends CoreDatabaseMetaData {
             private final String fkName;
             private final String pkTableName;
             private final String fkTableName;
-            private final List<String> fkColNames = new ArrayList<>();
-            private final List<String> pkColNames = new ArrayList<>();
+            private final List<String> fkColNames = new ArrayList<String>();
+            private final List<String> pkColNames = new ArrayList<String>();
             private final String onUpdate;
             private final String onDelete;
             private final String match;

@@ -7,7 +7,7 @@ import java.sql.SQLException;
 import java.sql.SQLFeatureNotSupportedException;
 import java.sql.SQLWarning;
 import java.sql.Statement;
-import java.util.Arrays;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.sqlite.ExtendedCommand;
@@ -16,6 +16,7 @@ import org.sqlite.SQLiteConnection;
 import org.sqlite.core.CoreStatement;
 import org.sqlite.core.DB;
 import org.sqlite.core.DB.ProgressObserver;
+import org.sqlite.util.Convert;
 
 public abstract class JDBC3Statement extends CoreStatement {
 
@@ -39,26 +40,28 @@ public abstract class JDBC3Statement extends CoreStatement {
     /** @see java.sql.Statement#execute(java.lang.String) */
     public boolean execute(final String sql) throws SQLException {
         internalClose();
+        
+        return this.withConnectionTimeout(new SQLCallable<Boolean>() {
+        	@Override
+        	public Boolean call() throws SQLException {
+        		SQLExtension ext = ExtendedCommand.parse(sql);
+                if (ext != null) {
+                    ext.execute(conn.getDatabase());
 
-        return this.withConnectionTimeout(
-                () -> {
-                    SQLExtension ext = ExtendedCommand.parse(sql);
-                    if (ext != null) {
-                        ext.execute(conn.getDatabase());
+                    return false;
+                }
 
-                        return false;
-                    }
-
-                    JDBC3Statement.this.sql = sql;
-                    synchronized (conn) {
-                        conn.getDatabase().prepare(JDBC3Statement.this);
-                        boolean result = exec();
-                        updateGeneratedKeys();
-                        updateCount = getDatabase().changes();
-                        exhaustedResults = false;
-                        return result;
-                    }
-                });
+                JDBC3Statement.this.sql = sql;
+                synchronized (conn) {
+                    conn.getDatabase().prepare(JDBC3Statement.this);
+                    boolean result = exec();
+                    updateGeneratedKeys();
+                    updateCount = getDatabase().changes();
+                    exhaustedResults = false;
+                    return result;
+                }
+        	}
+		});
     }
 
     /** @see java.sql.Statement#execute(java.lang.String, int) */
@@ -80,20 +83,22 @@ public abstract class JDBC3Statement extends CoreStatement {
     public ResultSet executeQuery(String sql) throws SQLException {
         internalClose();
         this.sql = sql;
+        
+        return this.withConnectionTimeout(new SQLCallable<ResultSet>() {
+        	@Override
+        	public ResultSet call() throws SQLException {
+        		conn.getDatabase().prepare(JDBC3Statement.this);
 
-        return this.withConnectionTimeout(
-                () -> {
-                    conn.getDatabase().prepare(JDBC3Statement.this);
+                if (!exec()) {
+                    internalClose();
+                    throw new SQLException(
+                            "query does not return ResultSet", "SQLITE_DONE", SQLITE_DONE);
+                }
+                exhaustedResults = false;
 
-                    if (!exec()) {
-                        internalClose();
-                        throw new SQLException(
-                                "query does not return ResultSet", "SQLITE_DONE", SQLITE_DONE);
-                    }
-                    exhaustedResults = false;
-
-                    return getResultSet();
-                });
+                return getResultSet();
+        	}
+		});
     }
 
     static class BackupObserver implements ProgressObserver {
@@ -115,43 +120,45 @@ public abstract class JDBC3Statement extends CoreStatement {
     }
 
     /** @see java.sql.Statement#executeLargeUpdate(java.lang.String) */
-    public long executeLargeUpdate(String sql) throws SQLException {
+    public long executeLargeUpdate(final String sql) throws SQLException {
         internalClose();
         this.sql = sql;
-
-        return this.withConnectionTimeout(
-                () -> {
-                    DB db = conn.getDatabase();
-                    long changes = 0;
-                    SQLExtension ext = ExtendedCommand.parse(sql);
-                    if (ext != null) {
-                        // execute extended command
-                        ext.execute(db);
-                    } else {
-                        try {
-                            synchronized (db) {
-                                changes = db.total_changes();
-                                // directly invokes the exec API to support multiple SQL statements
-                                int statusCode = db._exec(sql);
-                                if (statusCode != SQLITE_OK)
-                                    throw DB.newSQLException(statusCode, "");
-                                updateGeneratedKeys();
-                                changes = db.total_changes() - changes;
-                            }
-
-                        } finally {
-                            internalClose();
+        
+        return this.withConnectionTimeout(new SQLCallable<Long>() {
+        	@Override
+        	public Long call() throws SQLException {
+        		DB db = conn.getDatabase();
+                long changes = 0;
+                SQLExtension ext = ExtendedCommand.parse(sql);
+                if (ext != null) {
+                    // execute extended command
+                    ext.execute(db);
+                } else {
+                    try {
+                        synchronized (db) {
+                            changes = db.total_changes();
+                            // directly invokes the exec API to support multiple SQL statements
+                            int statusCode = db._exec(sql);
+                            if (statusCode != SQLITE_OK)
+                                throw DB.newSQLException(statusCode, "");
+                            updateGeneratedKeys();
+                            changes = db.total_changes() - changes;
                         }
+
+                    } finally {
+                        internalClose();
                     }
-                    return changes;
-                });
+                }
+                return changes;
+        	}
+		});
     }
 
     /** @see java.sql.Statement#executeLargeUpdate(java.lang.String, int) */
     public long executeLargeUpdate(String sql, int autoGeneratedKeys) throws SQLException {
         return executeLargeUpdate(sql);
     }
-
+    
     /** @see java.sql.Statement#getResultSet() */
     public ResultSet getResultSet() throws SQLException {
         checkOpen();
@@ -161,13 +168,13 @@ public abstract class JDBC3Statement extends CoreStatement {
         if (rs.isOpen()) {
             throw new SQLException("ResultSet already requested");
         }
-
-        if (pointer.safeRunInt(DB::column_count) == 0) {
-            return null;
+        
+        if (DB.safeRunColumnCount(pointer) == 0) {
+        	return null;
         }
 
         if (rs.colsMeta == null) {
-            rs.colsMeta = pointer.safeRun(DB::column_names);
+        	rs.colsMeta = DB.safeRunColumnNames(pointer); 
         }
 
         rs.cols = rs.colsMeta;
@@ -187,7 +194,7 @@ public abstract class JDBC3Statement extends CoreStatement {
     public int getUpdateCount() throws SQLException {
         return (int) getLargeUpdateCount();
     }
-
+    
     /**
      * This function has a complex behaviour best understood by carefully reading the JavaDoc for
      * getMoreResults() and considering the test StatementTest.execute().
@@ -195,11 +202,10 @@ public abstract class JDBC3Statement extends CoreStatement {
      * @see java.sql.Statement#getLargeUpdateCount()
      */
     public long getLargeUpdateCount() throws SQLException {
-        DB db = conn.getDatabase();
         if (!pointer.isClosed()
                 && !rs.isOpen()
                 && !resultsWaiting
-                && pointer.safeRunInt(DB::column_count) == 0) return updateCount;
+                && DB.safeRunColumnCount(pointer) == 0) return updateCount;
         return -1;
     }
 
@@ -222,7 +228,8 @@ public abstract class JDBC3Statement extends CoreStatement {
 
     /** @see java.sql.Statement#executeBatch() */
     public int[] executeBatch() throws SQLException {
-        return Arrays.stream(executeLargeBatch()).mapToInt(l -> (int) l).toArray();
+    	long[] result = executeLargeBatch();
+    	return Convert.toIntArray(result);
     }
 
     /** @see java.sql.Statement#executeLargeBatch() */
@@ -242,7 +249,7 @@ public abstract class JDBC3Statement extends CoreStatement {
                         changes[i] = db.executeUpdate(this, null);
                     } catch (SQLException e) {
                         throw new BatchUpdateException(
-                                "batch entry " + i + ": " + e.getMessage(), null, 0, changes, e);
+                                "batch entry " + i + ": " + e.getMessage(), null, 0, Convert.toIntArray(changes), e);
                     } finally {
                         if (pointer != null) pointer.close();
                     }
@@ -460,7 +467,6 @@ public abstract class JDBC3Statement extends CoreStatement {
         }
     }
 
-    @FunctionalInterface
     protected interface SQLCallable<T> {
 
         T call() throws SQLException;

@@ -1,7 +1,7 @@
 package org.sqlite.util;
 
+import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 public class QueryUtils {
     /**
@@ -12,30 +12,30 @@ public class QueryUtils {
      * @return SQL query as string
      */
     public static String valuesQuery(List<String> columns, List<List<Object>> valuesList) {
-        valuesList.forEach(
-                (list) -> {
-                    if (list.size() != columns.size())
-                        throw new IllegalArgumentException(
-                                "values and columns must have the same size");
-                });
+    	for (List<Object> list : valuesList) {
+    		if (list.size() != columns.size()) {
+    			throw new IllegalArgumentException("values and columns must have the same size");
+    		}
+    	}
+    	
+    	List<String> rows = new ArrayList<String>();
+    	for (List<Object> values : valuesList) {
+    		List<String> items = new ArrayList<String>();
+    		for (Object o : values) {
+    			if (o instanceof String)
+    				items.add("'" + o + "'");
+    			else if (o == null)
+    				items.add("null");
+    			else
+    				items.add(o.toString());
+    		}
+    		rows.add("(" + StringUtils.join(",", items) + ")");
+    	}
+    	
         return "with cte("
-                + String.join(",", columns)
+                + StringUtils.join(",", columns)
                 + ") as (values "
-                + valuesList.stream()
-                        .map(
-                                (values) ->
-                                        "("
-                                                + values.stream()
-                                                        .map(
-                                                                (o -> {
-                                                                    if (o instanceof String)
-                                                                        return "'" + o + "'";
-                                                                    if (o == null) return "null";
-                                                                    return o.toString();
-                                                                }))
-                                                        .collect(Collectors.joining(","))
-                                                + ")")
-                        .collect(Collectors.joining(","))
+                + StringUtils.join(",", rows)
                 + ") select * from cte";
     }
 }

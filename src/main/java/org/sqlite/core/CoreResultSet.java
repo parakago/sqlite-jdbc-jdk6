@@ -119,7 +119,7 @@ public abstract class CoreResultSet implements Codes {
     public void checkMeta() throws SQLException {
         checkCol(1);
         if (meta == null) {
-            meta = stmt.pointer.safeRun(DB::column_metadata);
+            meta = DB.safeRunColumnMetadata(stmt.pointer);
         }
     }
 
@@ -141,7 +141,7 @@ public abstract class CoreResultSet implements Codes {
         DB db = stmt.getDatabase();
         synchronized (db) {
             if (!stmt.pointer.isClosed()) {
-                stmt.pointer.safeRunInt(DB::reset);
+            	DB.safeRunReset(stmt.pointer);
 
                 if (closeStmt) {
                     closeStmt = false; // break recursive call

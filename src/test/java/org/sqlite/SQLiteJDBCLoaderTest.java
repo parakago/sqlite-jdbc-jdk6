@@ -24,32 +24,41 @@
 // --------------------------------------
 package org.sqlite;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatNoException;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertTrue;
 
-import java.nio.file.Path;
-import java.sql.*;
+import java.io.File;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
 public class SQLiteJDBCLoaderTest {
-
+	@Rule
+    public TemporaryFolder tempDir = new TemporaryFolder();
+	
     private Connection connection = null;
 
-    @BeforeEach
+    @Before
     public void setUp() throws Exception {
         connection = null;
         // create a database connection
         connection = DriverManager.getConnection("jdbc:sqlite::memory:");
     }
 
-    @AfterEach
+    @After
     public void tearDown() throws Exception {
         if (connection != null) {
             connection.close();
@@ -60,25 +69,25 @@ public class SQLiteJDBCLoaderTest {
     public void query() {
         // if e.getMessage() is "out of memory", it probably means no
         // database file is found
-        assertThatNoException()
-                .isThrownBy(
-                        () -> {
-                            Statement statement = connection.createStatement();
-                            statement.setQueryTimeout(30); // set timeout to 30 sec.
+    	try {
+    		Statement statement = connection.createStatement();
+            statement.setQueryTimeout(30); // set timeout to 30 sec.
 
-                            statement.executeUpdate(
-                                    "create table person ( id integer, name string)");
-                            statement.executeUpdate("insert into person values(1, 'leo')");
-                            statement.executeUpdate("insert into person values(2, 'yui')");
+            statement.executeUpdate(
+                    "create table person ( id integer, name string)");
+            statement.executeUpdate("insert into person values(1, 'leo')");
+            statement.executeUpdate("insert into person values(2, 'yui')");
 
-                            ResultSet rs =
-                                    statement.executeQuery("select * from person order by id");
-                            while (rs.next()) {
-                                // read the result set
-                                rs.getInt(1);
-                                rs.getString(2);
-                            }
-                        });
+            ResultSet rs =
+                    statement.executeQuery("select * from person order by id");
+            while (rs.next()) {
+                // read the result set
+                rs.getInt(1);
+                rs.getString(2);
+            }
+    	} catch (Exception e) {
+			assertTrue("assertThatNoException", false);
+		}
     }
 
     @Test
@@ -98,43 +107,48 @@ public class SQLiteJDBCLoaderTest {
                 });
 
         ResultSet rs = connection.createStatement().executeQuery("select total(1, 2, 3, 4, 5)");
-        assertThat(rs.next()).isTrue();
-        assertThat(rs.getInt(1)).isEqualTo(1 + 2 + 3 + 4 + 5);
+        assertTrue(rs.next());
+        assertEquals(rs.getInt(1), 1 + 2 + 3 + 4 + 5);
     }
 
     @Test
     public void version() {
-        assertThat(SQLiteJDBCLoader.getVersion()).isNotEqualTo("unknown");
+        assertNotEquals(SQLiteJDBCLoader.getVersion(), "unknown");
     }
 
     @Test
-    public void test(@TempDir Path tmpDir) throws Throwable {
+    public void test() throws Throwable {
         final AtomicInteger completedThreads = new AtomicInteger(0);
         ExecutorService pool = Executors.newFixedThreadPool(32);
         for (int i = 0; i < 32; i++) {
-            final String connStr = "jdbc:sqlite:" + tmpDir.resolve("sample-" + i + ".db");
+            final String connStr = "jdbc:sqlite:" + new File(tempDir.getRoot(), "sample-" + i + ".db").getPath();
             final int sleepMillis = i;
-            pool.execute(
-                    () -> {
-                        try {
-                            Thread.sleep(sleepMillis * 10);
-                        } catch (InterruptedException ignored) {
-                        }
-                        assertThatNoException()
-                                .isThrownBy(
-                                        () -> {
-                                            // Uncomment the synchronized block and everything
-                                            // works.
-                                            // synchronized (TestSqlite.class) {
-                                            Connection conn = DriverManager.getConnection(connStr);
-                                            conn.close();
-                                            // }
-                                        });
-                        completedThreads.incrementAndGet();
-                    });
+            
+            pool.execute(new Runnable() {
+				@Override
+				public void run() {
+					try {
+                        Thread.sleep(sleepMillis * 10);
+                    } catch (InterruptedException ignored) {
+                    }
+					
+					try {
+						// Uncomment the synchronized block and everything
+                        // works.
+                        // synchronized (TestSqlite.class) {
+                        Connection conn = DriverManager.getConnection(connStr);
+                        conn.close();
+                        // }
+					} catch (Exception e) {
+						assertTrue("assertThatNoException", false);
+					}
+					
+                    completedThreads.incrementAndGet();
+				}
+			});
         }
         pool.shutdown();
         pool.awaitTermination(3, TimeUnit.SECONDS);
-        assertThat(completedThreads.get()).isEqualTo(32);
+        assertEquals(completedThreads.get(), 32);
     }
 }

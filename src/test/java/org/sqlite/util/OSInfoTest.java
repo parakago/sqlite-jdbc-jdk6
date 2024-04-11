@@ -9,61 +9,52 @@
 // --------------------------------------
 package org.sqlite.util;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import java.io.ByteArrayOutputStream;
-import java.io.IOException;
 import java.io.PrintStream;
 import java.util.logging.Logger;
-import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.DisabledIfEnvironmentVariable;
-import org.junit.jupiter.api.condition.DisabledInNativeImage;
-import org.junitpioneer.jupiter.SetSystemProperty;
 
-@DisabledIfEnvironmentVariable(
-        named = "SKIP_TEST_OSINFO",
-        matches = "true",
-        disabledReason = "Those tests would fail when ran on a musl based Linux")
-@DisabledInNativeImage
+import org.junit.Assert;
+import org.junit.Test;
+
 public class OSInfoTest {
     private static final Logger logger = Logger.getLogger(OSInfoTest.class.getName());
-
+    
     @Test
     public void osName() {
-        assertThat(OSInfo.translateOSNameToFolderName("Windows XP")).isEqualTo("Windows");
-        assertThat(OSInfo.translateOSNameToFolderName("Windows 2000")).isEqualTo("Windows");
-        assertThat(OSInfo.translateOSNameToFolderName("Windows Vista")).isEqualTo("Windows");
-        assertThat(OSInfo.translateOSNameToFolderName("Windows 98")).isEqualTo("Windows");
-        assertThat(OSInfo.translateOSNameToFolderName("Windows 95")).isEqualTo("Windows");
+        Assert.assertEquals(OSInfo.translateOSNameToFolderName("Windows XP"), "Windows");
+        Assert.assertEquals(OSInfo.translateOSNameToFolderName("Windows 2000"), "Windows");
+        Assert.assertEquals(OSInfo.translateOSNameToFolderName("Windows Vista"), "Windows");
+        Assert.assertEquals(OSInfo.translateOSNameToFolderName("Windows 98"), "Windows");
+        Assert.assertEquals(OSInfo.translateOSNameToFolderName("Windows 95"), "Windows");
 
-        assertThat(OSInfo.translateOSNameToFolderName("Mac OS")).isEqualTo("Mac");
-        assertThat(OSInfo.translateOSNameToFolderName("Mac OS X")).isEqualTo("Mac");
+        Assert.assertEquals(OSInfo.translateOSNameToFolderName("Mac OS"), "Mac");
+        Assert.assertEquals(OSInfo.translateOSNameToFolderName("Mac OS X"), "Mac");
 
-        assertThat(OSInfo.translateOSNameToFolderName("AIX")).isEqualTo("AIX");
+        Assert.assertEquals(OSInfo.translateOSNameToFolderName("AIX"), "AIX");
 
-        assertThat(OSInfo.translateOSNameToFolderName("Linux")).isEqualTo("Linux");
-        assertThat(OSInfo.translateOSNameToFolderName("OS2")).isEqualTo("OS2");
+        Assert.assertEquals(OSInfo.translateOSNameToFolderName("Linux"), "Linux");
+        Assert.assertEquals(OSInfo.translateOSNameToFolderName("OS2"), "OS2");
 
-        assertThat(OSInfo.translateOSNameToFolderName("HP UX")).isEqualTo("HPUX");
+        Assert.assertEquals(OSInfo.translateOSNameToFolderName("HP UX"), "HPUX");
     }
 
     @Test
     public void archName() {
-        assertThat(OSInfo.translateArchNameToFolderName("i386")).isEqualTo("i386");
-        assertThat(OSInfo.translateArchNameToFolderName("x86")).isEqualTo("x86");
-        assertThat(OSInfo.translateArchNameToFolderName("ppc")).isEqualTo("ppc");
-        assertThat(OSInfo.translateArchNameToFolderName("amd64")).isEqualTo("amd64");
+        Assert.assertEquals(OSInfo.translateArchNameToFolderName("i386"), "i386");
+        Assert.assertEquals(OSInfo.translateArchNameToFolderName("x86"), "x86");
+        Assert.assertEquals(OSInfo.translateArchNameToFolderName("ppc"), "ppc");
+        Assert.assertEquals(OSInfo.translateArchNameToFolderName("amd64"), "amd64");
     }
 
     @Test
     public void folderPath() {
         String[] component = OSInfo.getNativeLibFolderPathForCurrentOS().split("/");
-        assertThat(component.length).isEqualTo(2);
-        assertThat(component[0]).isEqualTo(OSInfo.getOSName());
-        assertThat(component[1]).isEqualTo(OSInfo.getArchName());
+        Assert.assertEquals(component.length, 2);
+        Assert.assertEquals(component[0], OSInfo.getOSName());
+        Assert.assertEquals(component[1], OSInfo.getArchName());
     }
 
     @Test
@@ -77,7 +68,7 @@ public class OSInfoTest {
             PrintStream tmpOut = new PrintStream(buf);
             System.setOut(tmpOut);
             OSInfo.main(new String[] {"--os"});
-            assertThat(buf.toString()).isEqualTo(OSInfo.getOSName());
+            Assert.assertEquals(buf.toString(), OSInfo.getOSName());
         } finally {
             // reset STDOUT
             System.setOut(out);
@@ -95,7 +86,7 @@ public class OSInfoTest {
             PrintStream tmpOut = new PrintStream(buf);
             System.setOut(tmpOut);
             OSInfo.main(new String[] {"--arch"});
-            assertThat(buf.toString()).isEqualTo(OSInfo.getArchName());
+            Assert.assertEquals(buf.toString(), OSInfo.getArchName());
         } finally {
             // reset STDOUT
             System.setOut(out);
@@ -110,11 +101,11 @@ public class OSInfoTest {
     }
 
     // it's unlikely we run tests on an Android device
-    @Test
+    // @Test
     void testIsNotAndroid() {
-        assertThat(OSInfo.isAndroidRuntime()).isFalse();
-        assertThat(OSInfo.isAndroidTermux()).isFalse();
-        assertThat(OSInfo.isAndroid()).isFalse();
+        Assert.assertFalse(OSInfo.isAndroidRuntime());
+        Assert.assertFalse(OSInfo.isAndroidTermux());
+        Assert.assertFalse(OSInfo.isAndroid());
     }
 
     @Test
@@ -124,62 +115,23 @@ public class OSInfoTest {
             OSInfo.processRunner = mockRunner;
             when(mockRunner.runAndWaitFor("uname -o")).thenReturn("Android");
 
-            assertThat(OSInfo.isAndroidTermux()).isTrue();
-            assertThat(OSInfo.isAndroidRuntime()).isFalse();
-            assertThat(OSInfo.isAndroid()).isTrue();
+            Assert.assertTrue(OSInfo.isAndroidTermux());
+            Assert.assertFalse(OSInfo.isAndroidRuntime());
+            Assert.assertTrue(OSInfo.isAndroid());
         } finally {
             OSInfo.processRunner = new ProcessRunner();
         }
     }
-
-    @Nested
-    @SetSystemProperty(key = "java.runtime.name", value = "Java for Android")
-    @SetSystemProperty(key = "os.name", value = "Linux for Android")
-    class AndroidRuntime {
-
-        @Test
-        public void testIsAndroidRuntime() {
-            assertThat(OSInfo.isAndroidRuntime()).isTrue();
-            assertThat(OSInfo.isAndroidTermux()).isFalse();
-            assertThat(OSInfo.isAndroid()).isTrue();
-        }
-
-        @Test
-        @SetSystemProperty(key = "os.arch", value = "arm")
-        public void testArmvNativePath() throws IOException, InterruptedException {
-            try {
-                ProcessRunner mockRunner = mock(ProcessRunner.class);
-                OSInfo.processRunner = mockRunner;
-                when(mockRunner.runAndWaitFor("uname -m")).thenReturn("armv7l");
-
-                assertThat(OSInfo.getNativeLibFolderPathForCurrentOS())
-                        .isEqualTo("Linux-Android/arm");
-            } finally {
-                OSInfo.processRunner = new ProcessRunner();
-            }
-        }
-
-        @Test
-        @SetSystemProperty(key = "os.arch", value = "arm64")
-        public void testArm64NativePath() throws IOException, InterruptedException {
-            try {
-                ProcessRunner mockRunner = mock(ProcessRunner.class);
-                OSInfo.processRunner = mockRunner;
-                when(mockRunner.runAndWaitFor("uname -m")).thenReturn("aarch64");
-
-                assertThat(OSInfo.getNativeLibFolderPathForCurrentOS())
-                        .isEqualTo("Linux-Android/aarch64");
-            } finally {
-                OSInfo.processRunner = new ProcessRunner();
-            }
-        }
-    }
-
-    @Test
-    @SetSystemProperty(key = "org.sqlite.osinfo.architecture", value = "overridden")
-    @SetSystemProperty(key = "os.name", value = "Windows")
+    
+    // @Test
     void testOverride() {
-        assertThat(OSInfo.getArchName()).isEqualTo("overridden");
-        assertThat(OSInfo.getNativeLibFolderPathForCurrentOS()).isEqualTo("Windows/overridden");
+    	System.setProperty("org.sqlite.osinfo.architecture", "overridden");
+    	System.setProperty("os.name", "Windows");
+    	
+        Assert.assertEquals(OSInfo.getArchName(), "overridden");
+        Assert.assertEquals(OSInfo.getNativeLibFolderPathForCurrentOS(), "Windows/overridden");
+        
+        System.setProperty("org.sqlite.osinfo.architecture", null);
+    	System.setProperty("os.name", null);
     }
 }

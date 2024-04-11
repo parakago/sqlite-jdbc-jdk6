@@ -2,6 +2,8 @@ package org.sqlite.core;
 
 import java.sql.SQLException;
 
+import mock.java.util.Objects;
+
 /**
  * A class for safely wrapping calls to a native pointer to a statement, ensuring no other thread
  * has access to the pointer while it is run
@@ -159,30 +161,25 @@ public class SafeStmtPtr {
 
     @Override
     public int hashCode() {
-        return Long.hashCode(ptr);
+        return Objects.hashCode(ptr);
     }
 
-    @FunctionalInterface
     public interface SafePtrIntFunction<E extends Throwable> {
         int run(DB db, long ptr) throws E;
     }
 
-    @FunctionalInterface
     public interface SafePtrLongFunction<E extends Throwable> {
         long run(DB db, long ptr) throws E;
     }
 
-    @FunctionalInterface
     public interface SafePtrDoubleFunction<E extends Throwable> {
         double run(DB db, long ptr) throws E;
     }
 
-    @FunctionalInterface
     public interface SafePtrFunction<T, E extends Throwable> {
         T run(DB db, long ptr) throws E;
     }
 
-    @FunctionalInterface
     public interface SafePtrConsumer<E extends Throwable> {
         void run(DB db, long ptr) throws E;
     }

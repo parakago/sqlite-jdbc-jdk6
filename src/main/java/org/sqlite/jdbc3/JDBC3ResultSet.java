@@ -20,9 +20,11 @@ import java.util.GregorianCalendar;
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
 import org.sqlite.core.CoreResultSet;
 import org.sqlite.core.CoreStatement;
 import org.sqlite.core.DB;
+import org.sqlite.core.SafeStmtPtr;
 import org.sqlite.date.FastDateFormat;
 
 public abstract class JDBC3ResultSet extends CoreResultSet {
@@ -70,7 +72,7 @@ public abstract class JDBC3ResultSet extends CoreResultSet {
         }
 
         // do the real work
-        int statusCode = stmt.pointer.safeRunInt(DB::step);
+        int statusCode = DB.safeRunStep(stmt.pointer);
         switch (statusCode) {
             case SQLITE_DONE:
                 pastLastRow = true;
@@ -212,8 +214,13 @@ public abstract class JDBC3ResultSet extends CoreResultSet {
     }
 
     /** @see java.sql.ResultSet#getBytes(int) */
-    public byte[] getBytes(int col) throws SQLException {
-        return stmt.pointer.safeRun((db, ptr) -> db.column_blob(ptr, markCol(col)));
+    public byte[] getBytes(final int col) throws SQLException {
+    	return stmt.pointer.safeRun(new SafeStmtPtr.SafePtrFunction<byte[], SQLException>() {
+    		@Override
+    		public byte[] run(DB db, long ptr) throws SQLException {
+    			return db.column_blob(ptr, markCol(col));
+    		}
+		});
     }
 
     /** @see java.sql.ResultSet#getBytes(java.lang.String) */
@@ -327,8 +334,13 @@ public abstract class JDBC3ResultSet extends CoreResultSet {
     }
 
     /** @see java.sql.ResultSet#getInt(int) */
-    public int getInt(int col) throws SQLException {
-        return stmt.pointer.safeRunInt((db, ptr) -> db.column_int(ptr, markCol(col)));
+    public int getInt(final int col) throws SQLException {
+    	return stmt.pointer.safeRunInt(new SafeStmtPtr.SafePtrIntFunction<SQLException>() {
+    		@Override
+    		public int run(DB db, long ptr) throws SQLException {
+    			return db.column_int(ptr, markCol(col));
+    		}
+		});
     }
 
     /** @see java.sql.ResultSet#getInt(java.lang.String) */
@@ -770,9 +782,14 @@ public abstract class JDBC3ResultSet extends CoreResultSet {
         return 0;
     }
 
-    private String getColumnDeclType(int col) throws SQLException {
-        String declType = stmt.pointer.safeRun((db, ptr) -> db.column_decltype(ptr, checkCol(col)));
-
+    private String getColumnDeclType(final int col) throws SQLException {
+    	String declType = stmt.pointer.safeRun(new SafeStmtPtr.SafePtrFunction<String, SQLException>() {
+    		@Override
+    		public String run(DB db, long ptr) throws SQLException {
+    			return db.column_decltype(ptr, checkCol(col));
+    		}
+		});
+    	
         if (declType == null) {
             Matcher matcher = COLUMN_TYPECAST.matcher(safeGetColumnName(col));
             declType = matcher.find() ? matcher.group(1) : null;
@@ -962,27 +979,57 @@ public abstract class JDBC3ResultSet extends CoreResultSet {
         }
     }
 
-    protected int safeGetColumnType(int col) throws SQLException {
-        return stmt.pointer.safeRunInt((db, ptr) -> db.column_type(ptr, col));
+    protected int safeGetColumnType(final int col) throws SQLException {
+    	return stmt.pointer.safeRunInt(new SafeStmtPtr.SafePtrIntFunction<SQLException>() {
+    		@Override
+    		public int run(DB db, long ptr) throws SQLException {
+    			return db.column_type(ptr, col);
+    		}
+		});
     }
 
-    private long safeGetLongCol(int col) throws SQLException {
-        return stmt.pointer.safeRunLong((db, ptr) -> db.column_long(ptr, markCol(col)));
+    private long safeGetLongCol(final int col) throws SQLException {
+    	return stmt.pointer.safeRunLong(new SafeStmtPtr.SafePtrLongFunction<SQLException>() {
+    		@Override
+    		public long run(DB db, long ptr) throws SQLException {
+    			return db.column_long(ptr, markCol(col));
+    		}
+		});
     }
 
-    private double safeGetDoubleCol(int col) throws SQLException {
-        return stmt.pointer.safeRunDouble((db, ptr) -> db.column_double(ptr, markCol(col)));
+    private double safeGetDoubleCol(final int col) throws SQLException {
+    	return stmt.pointer.safeRunDouble(new SafeStmtPtr.SafePtrDoubleFunction<SQLException>() {
+    		@Override
+    		public double run(DB db, long ptr) throws SQLException {
+    			return db.column_double(ptr, markCol(col));
+    		}
+		});
     }
 
-    private String safeGetColumnText(int col) throws SQLException {
-        return stmt.pointer.safeRun((db, ptr) -> db.column_text(ptr, markCol(col)));
+    private String safeGetColumnText(final int col) throws SQLException {
+    	return stmt.pointer.safeRun(new SafeStmtPtr.SafePtrFunction<String, SQLException>() {
+    		@Override
+    		public String run(DB db, long ptr) throws SQLException {
+    			return db.column_text(ptr, markCol(col));
+    		}
+		});
     }
 
-    private String safeGetColumnTableName(int col) throws SQLException {
-        return stmt.pointer.safeRun((db, ptr) -> db.column_table_name(ptr, checkCol(col)));
+    private String safeGetColumnTableName(final int col) throws SQLException {
+    	return stmt.pointer.safeRun(new SafeStmtPtr.SafePtrFunction<String, SQLException>() {
+    		@Override
+    		public String run(DB db, long ptr) throws SQLException {
+    			return db.column_table_name(ptr, checkCol(col));
+    		}
+		});
     }
 
-    private String safeGetColumnName(int col) throws SQLException {
-        return stmt.pointer.safeRun((db, ptr) -> db.column_name(ptr, checkCol(col)));
+    private String safeGetColumnName(final int col) throws SQLException {
+    	return stmt.pointer.safeRun(new SafeStmtPtr.SafePtrFunction<String, SQLException>() {
+    		@Override
+    		public String run(DB db, long ptr) throws SQLException {
+    			return db.column_name(ptr, checkCol(col));
+    		}
+		});
     }
 }

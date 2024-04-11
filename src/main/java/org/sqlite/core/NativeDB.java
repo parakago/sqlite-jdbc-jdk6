@@ -17,7 +17,7 @@
 package org.sqlite.core;
 
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
+import mock.java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

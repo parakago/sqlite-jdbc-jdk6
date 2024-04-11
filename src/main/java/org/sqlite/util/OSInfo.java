@@ -24,13 +24,13 @@
 // --------------------------------------
 package org.sqlite.util;
 
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileReader;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.Locale;
-import java.util.stream.Stream;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -41,7 +41,7 @@ import org.slf4j.LoggerFactory;
  */
 public class OSInfo {
     protected static ProcessRunner processRunner = new ProcessRunner();
-    private static final HashMap<String, String> archMapping = new HashMap<>();
+    private static final HashMap<String, String> archMapping = new HashMap<String, String>();
 
     public static final String X86 = "x86";
     public static final String X86_64 = "x86_64";
@@ -129,31 +129,36 @@ public class OSInfo {
     }
 
     public static boolean isMusl() {
-        Path mapFilesDir = Paths.get("/proc/self/map_files");
-        try (Stream<Path> dirStream = Files.list(mapFilesDir)) {
-            return dirStream
-                    .map(
-                            path -> {
-                                try {
-                                    return path.toRealPath().toString();
-                                } catch (IOException e) {
-                                    return "";
-                                }
-                            })
-                    .anyMatch(s -> s.toLowerCase().contains("musl"));
-        } catch (Exception ignored) {
-            // fall back to checking for alpine linux in the event we're using an older kernel which
-            // may not fail the above check
-            return isAlpineLinux();
+    	File dir = new File("/proc/self/map_files");
+    	if (dir.exists()) {
+    		for (File file : dir.listFiles()) {
+        		if (file.getAbsolutePath().toLowerCase().contains("musl")) {
+        			return true;
+        		}
+    		}
         }
+    	
+    	return isAlpineLinux();
     }
 
     private static boolean isAlpineLinux() {
-        try (Stream<String> osLines = Files.lines(Paths.get("/etc/os-release"))) {
-            return osLines.anyMatch(l -> l.startsWith("ID") && l.contains("alpine"));
-        } catch (Exception ignored2) {
+        File file = new File("/etc/os-release");
+        if (!file.exists()) return false;
+        
+        BufferedReader br = null;
+        try {
+        	br = new BufferedReader(new FileReader(file));
+        	for (String line = null; (line = br.readLine()) != null;) {
+        		if (line.startsWith("ID") && line.contains("alpine")) {
+        			return true;
+        		}
+        	}
+        	return false;
+        } catch (IOException ignored) {
+        	return false;
+        } finally {
+        	try { if (br != null) br.close(); } catch (IOException e) {}
         }
-        return false;
     }
 
     static String getHardwareName() {
@@ -224,8 +229,10 @@ public class OSInfo {
                     LogHolder.logger.warn(
                             "readelf not found. Cannot check if running on an armhf system, armel architecture will be presumed");
                 }
-            } catch (IOException | InterruptedException e) {
+            } catch (IOException e) {
                 // ignored: fall back to "arm" arch (soft-float ABI)
+            } catch (InterruptedException e) {
+            	// ignored: fall back to "arm" arch (soft-float ABI)
             }
         }
         // Use armv5, soft-float ABI

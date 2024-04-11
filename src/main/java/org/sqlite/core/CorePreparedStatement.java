@@ -18,13 +18,14 @@ package org.sqlite.core;
 
 import java.sql.Date;
 import java.sql.SQLException;
-import java.util.Arrays;
 import java.util.Calendar;
+
 import org.sqlite.SQLiteConnection;
 import org.sqlite.SQLiteConnectionConfig;
 import org.sqlite.date.FastDateFormat;
 import org.sqlite.jdbc3.JDBC3Connection;
 import org.sqlite.jdbc4.JDBC4Statement;
+import org.sqlite.util.Convert;
 
 public abstract class CorePreparedStatement extends JDBC4Statement {
     protected int columnCount;
@@ -44,9 +45,10 @@ public abstract class CorePreparedStatement extends JDBC4Statement {
         this.sql = sql;
         DB db = conn.getDatabase();
         db.prepare(this);
-        rs.colsMeta = pointer.safeRun(DB::column_names);
-        columnCount = pointer.safeRunInt(DB::column_count);
-        paramCount = pointer.safeRunInt(DB::bind_parameter_count);
+        
+        rs.colsMeta = DB.safeRunColumnNames(pointer);
+        columnCount = DB.safeRunColumnCount(pointer);
+        paramCount = DB.safeRunBindParameterCount(pointer);
         batchQueryCount = 0;
         batch = null;
         batchPos = 0;
@@ -55,7 +57,7 @@ public abstract class CorePreparedStatement extends JDBC4Statement {
     /** @see org.sqlite.jdbc3.JDBC3Statement#executeBatch() */
     @Override
     public int[] executeBatch() throws SQLException {
-        return Arrays.stream(executeLargeBatch()).mapToInt(l -> (int) l).toArray();
+    	return Convert.toIntArray(executeLargeBatch());
     }
 
     /** @see org.sqlite.jdbc3.JDBC3Statement#executeLargeBatch() */
@@ -68,17 +70,19 @@ public abstract class CorePreparedStatement extends JDBC4Statement {
         if (this.conn instanceof JDBC3Connection) {
             ((JDBC3Connection) this.conn).tryEnforceTransactionMode();
         }
-
-        return this.withConnectionTimeout(
-                () -> {
-                    try {
-                        return conn.getDatabase()
-                                .executeBatch(
-                                        pointer, batchQueryCount, batch, conn.getAutoCommit());
-                    } finally {
-                        clearBatch();
-                    }
-                });
+        
+        return this.withConnectionTimeout(new SQLCallable<long[]>() {
+        	@Override
+        	public long[] call() throws SQLException {
+        		try {
+                    return conn.getDatabase()
+                            .executeBatch(
+                                    pointer, batchQueryCount, batch, conn.getAutoCommit());
+                } finally {
+                    clearBatch();
+                }
+        	}
+		});
     }
 
     /** @see org.sqlite.jdbc3.JDBC3Statement#clearBatch() () */
